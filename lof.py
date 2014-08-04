@@ -5,16 +5,15 @@
 Input: table of individual mutations and their Polyphen annotations.
 Output: table stratifying the mutational status of a gene in each sample.
 
-- In this table, there is a number ranging from 0-2 that corresponds to the
-  estimated number of alleles lost in a given sample. This value is calculated
-  by summing the normalized mutant alleles frequencies of all non-synonymous
-  mutations striking a gene in a given sample and capping them at 2.
-- Additionally, writes the distribution of all mutation types (not weighted
-  by MAF) in the final 8 columns of output.
+- In the output, for each sample there is a number ranging from 0-2 that
+  corresponds to the estimated number of alleles lost in a given sample. This
+  value is calculated by summing the normalized mutant alleles frequencies
+  (NMAF) of all non-synonymous mutations striking a gene in a given sample and
+  capping them at 2.
+- Also writes the distribution of all mutation types (not weighted by MAF) in
+  the final 8 columns of output.
 
-The output of this script is used as input to calculate the LOF burden.
-
-Source: LOF.pl and LOFpermute.pl
+This output is used as input to Step 2 to calculate the LOF burden.
 """
 from __future__ import print_function
 
@@ -49,21 +48,18 @@ def read_data(fname):
 
 def main(args):
     """."""
-    # __________________________________________
-    # Step 1
-
     data_lookup = read_data(args.data)
     my_genes = read_list(args.genes)
     my_samples = read_list(args.samples)
 
-    out_header = [""] + my_samples + [
+    out_header = ["Gene"] + my_samples + [
         "Missense:Benign", "Missense:Possibly", "Missense:Probably",
         "MissenseNA", "Nonsense", "Frameshift", "Splice-site", "Synonymous"]
     print(*out_header, sep='\t')
 
     for gene in my_genes:
         synonymous = missense_benign = missense_possibly = missense_probably = \
-                missense_na = frameshift = nonsense = splice = 0
+                missense_na = frameshift = nonsense = splice = indel = 0
 
         out_row = [gene]
         for sample in my_samples:
@@ -74,7 +70,7 @@ def main(args):
                     synonymous += 1
                     continue
                 if entry['muttype'] == 'Intron':
-                    # XXX
+                    # Shouldn't be here; ignore
                     continue
 
                 if entry['muttype'] == 'Missense_Mutation':
@@ -100,8 +96,7 @@ def main(args):
                 elif entry['muttype'] in ('Frame_Shift_Ins', 'Frame_Shift_Del'):
                     frameshift += 1
                 elif entry['muttype'] in ('In_Frame_Ins', 'In_Frame_Del'):
-                    # XXX
-                    pass
+                    indel += 1  # XXX TODO - include column in output
                 else:
                     print("Unhandled mutation type:", entry['muttype'],
                           file=sys.stderr)
