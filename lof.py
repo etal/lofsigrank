@@ -17,9 +17,35 @@ This output is used as input to Step 2 to calculate the LOF burden.
 """
 from __future__ import print_function
 
-import sys
 import collections
+import random
+import sys
 
+import pandas
+
+
+# ____________________________________________________________________________
+# Step 0: Permutation
+
+def permute_table(dtable):
+    """Permute a mutation data table's gene, sample and NMAF columns."""
+    shuffle_field(dtable, 'gene')
+    shuffle_field(dtable, 'sample')
+    shuffle_field(dtable, 'Normalized')
+    if 'Filler' in dtable:
+        del dtable['Filler']
+    # return dtable
+
+
+def shuffle_field(dframe, field):
+    """Shuffle a column of a pandas DataFrame in-place."""
+    column = list(dframe[field])
+    random.shuffle(column)
+    dframe[field] = column
+
+
+# _____________________________________________________________________________
+# Step 1: Calculate gene-level mutational statistics
 
 def read_list(fname):
     """Parse a "list" file of one string per line."""
@@ -28,34 +54,26 @@ def read_list(fname):
     return items
 
 
-def read_data(fname):
-    """Group relevant fields in (Permuted)Data.txt by gene and sample."""
+def group_data_by_gs(data_table):
+    """Group relevant fields in a data table by gene and sample."""
     gene_data = collections.defaultdict(lambda: collections.defaultdict(list))
-    with open(fname, 'rU') as handle:
-        lines = iter(handle)
-        next(lines)  # Skip the header
-        for line in lines:
-            (samp, muttype, gene, _contig, norm, _start, _end, _ref, _alt,
-             consequence) = line.split('\t', 10)[:10]
-            gene_data[gene][samp].append({
-                'muttype': muttype.strip(),
-                'normalized': float(norm),  # NMAF in the manuscript
-                'consequence': consequence.strip(),
-            })
-    print("Parsed", len(gene_data), "genes from", fname, file=sys.stderr)
+    for _idx, row in data_table.iterrows():
+        samp = row['sample']
+        gene = row['gene']
+        gene_data[gene][samp].append({
+            'muttype': row['type'].strip(),
+            'normalized': row['Normalized'], # float(norm),  # NMAF in the manuscript
+            'consequence': row['MissenseConsequence'].strip(),
+        })
     return gene_data
 
 
-def main(args):
+def make_lof_table(gene_lookup, my_genes, my_samples):
     """."""
-    data_lookup = read_data(args.data)
-    my_genes = read_list(args.genes)
-    my_samples = read_list(args.samples)
-
-    out_header = ["Gene"] + my_samples + [
+    # Header
+    yield ["Gene"] + my_samples + [
         "Missense:Benign", "Missense:Possibly", "Missense:Probably",
-        "MissenseNA", "Nonsense", "Frameshift", "Splice-site", "Synonymous"]
-    print(*out_header, sep='\t')
+        "MissenseNA", "Indel", "Nonsense", "Frameshift", "Splice-site", "Synonymous"]
 
     for gene in my_genes:
         synonymous = missense_benign = missense_possibly = missense_probably = \
@@ -65,7 +83,7 @@ def main(args):
         for sample in my_samples:
             normalized = [0]
             # Count mutations of each type for this gene and sample
-            for entry in data_lookup[gene][sample]:
+            for entry in gene_lookup[gene][sample]:
                 if entry['muttype'] == 'Silent':
                     synonymous += 1
                     continue
@@ -74,10 +92,6 @@ def main(args):
                     continue
 
                 if entry['muttype'] == 'Missense_Mutation':
-                    # {'benign': missense_benign,
-                    #  'possibly': missense_possibly,
-                    #  'probably': missense_probably,
-                    #  'NA': missense_na}[entry['consequence'] += 1
                     if entry['consequence'] == 'benign':
                         missense_benign += 1
                     elif entry['consequence'] == 'possibly':
@@ -96,7 +110,7 @@ def main(args):
                 elif entry['muttype'] in ('Frame_Shift_Ins', 'Frame_Shift_Del'):
                     frameshift += 1
                 elif entry['muttype'] in ('In_Frame_Ins', 'In_Frame_Del'):
-                    indel += 1  # XXX TODO - include column in output
+                    indel += 1
                 else:
                     print("Unhandled mutation type:", entry['muttype'],
                           file=sys.stderr)
@@ -106,17 +120,46 @@ def main(args):
             # Add up the normalized mutation counts for this gene and sample
             out_row.append(min(2, sum(normalized)))
         out_row.extend((missense_benign, missense_possibly, missense_probably,
-                        missense_na, nonsense, frameshift, splice, synonymous))
-        print(*out_row, sep='\t')
+                        missense_na, indel, nonsense, frameshift, splice,
+                        synonymous))
+        yield out_row
+
+
+def rows2dframe(rows):
+    """Convert an iterable of table rows to a pandas.DataFrame."""
+    header = next(rows)
+    return pandas.DataFrame.from_records(rows, columns=header)
+
+
+# _____________________________________________________________________________
+
+def main(args):
+    """."""
+    genes = read_list(args.genes)
+    samples = read_list(args.samples)
+    data_table = pandas.read_table(args.data_table, na_filter=False)
+
+    if args.permute:
+        permute_table(data_table)
+
+    gs_lookup = group_data_by_gs(data_table)
+    print("Saw", len(gs_lookup), "genes in", args.data_table, file=sys.stderr)
+
+    lof_table = rows2dframe(make_lof_table(gs_lookup, genes, samples))
+    lof_table.to_csv(sys.stdout, sep='\t', index=False)
 
 
 if __name__ == '__main__':
     import argparse
     AP = argparse.ArgumentParser(description=__doc__)
-    AP.add_argument('data',
-                    help="Mutation data table with Polyphen scores (Data.txt)")
+    AP.add_argument('data_table',
+                    help="""Mutation data table with NMAF values and Polyphen-2
+                    predictions (Data.txt)""")
     AP.add_argument('-g', '--genes', default="Genes.txt",
                     help="List of gene names, one per line (Genes.txt")
     AP.add_argument('-s', '--samples', default="Samples.txt",
                     help="List of sample names, one per line (Samples.txt")
+    AP.add_argument('-p', '--permute', action='store_true',
+                    help="""Permute the input data table to simulate the
+                    background mutation frequencies.""")
     main(AP.parse_args())

@@ -15,7 +15,7 @@ def shainsig(table, samples):
     mut_probdam = 'Missense:Probably'
     mut_syn = 'Synonymous'
     mut_trunc = ['Nonsense', 'Frameshift', 'Splice-site']
-    mut_other = ['Missense:Benign', 'Missense:Possibly', 'MissenseNA']
+    mut_other = ['Missense:Benign', 'Missense:Possibly', 'MissenseNA', 'Indel']
     mut_all = [mut_probdam, mut_syn] + mut_trunc + mut_other
 
     # _________________________________________________________________________
