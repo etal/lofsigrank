@@ -69,16 +69,6 @@ def shainsig(table, samples):
         final_score = new_score * probdam_factor * trunc_factor
         yield (row['Gene'], final_score)
 
-        # print(row['Gene'], ":",
-        #       "mutations = ", gene_count_all,
-        #       "RawScore =", raw_score,
-        #       "SynonymousFactor =", syn_factor,
-        #       "NewScore =", new_score,
-        #       "ProbDamFactor =", probdam_factor,
-        #       "TruncFactor =", trunc_factor,
-        #       "FinalScore =", final_score,
-        #       file=sys.stderr)  # DBG
-
 
 def main(args):
     """."""
@@ -95,7 +85,7 @@ if __name__ == '__main__':
     AP.add_argument('lof_table', help="LOF data table (TSV)")
     AP.add_argument('-s', '--samples', default="Samples.txt",
                     help="List of sample names, one per line (Samples.txt")
-    # AP.add_argument('-i', '--iterations', type=int, default=7,
+    # AP.add_argument('-p', '--permutations', type=int, default=7,
     #                 help="""Number of times to permute the input data to
     #                 simulate the background mutation frequencies.""")
     main(AP.parse_args())
