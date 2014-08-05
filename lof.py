@@ -1,20 +1,5 @@
 #!/usr/bin/env python
 
-"""Step 1: Calculate gene-level mutational statistics from a table of mutations.
-
-Input: table of individual mutations and their Polyphen annotations.
-Output: table stratifying the mutational status of a gene in each sample.
-
-- In the output, for each sample there is a number ranging from 0-2 that
-  corresponds to the estimated number of alleles lost in a given sample. This
-  value is calculated by summing the normalized mutant alleles frequencies
-  (NMAF) of all non-synonymous mutations striking a gene in a given sample and
-  capping them at 2.
-- Also writes the distribution of all mutation types (not weighted by MAF) in
-  the final 8 columns of output.
-
-This output is used as input to Step 2 to calculate the LOF burden.
-"""
 from __future__ import print_function
 
 import collections
@@ -34,7 +19,6 @@ def permute_table(dtable):
     shuffle_field(dtable, 'Normalized')
     if 'Filler' in dtable:
         del dtable['Filler']
-    # return dtable
 
 
 def shuffle_field(dframe, field):
@@ -54,27 +38,29 @@ def read_list(fname):
     return items
 
 
-def group_data_by_gs(data_table):
-    """Group relevant fields in a data table by gene and sample."""
-    gene_data = collections.defaultdict(lambda: collections.defaultdict(list))
-    for _idx, row in data_table.iterrows():
-        samp = row['sample']
-        gene = row['gene']
-        gene_data[gene][samp].append({
-            'muttype': row['type'].strip(),
-            'normalized': row['Normalized'], # float(norm),  # NMAF in the manuscript
-            'consequence': row['MissenseConsequence'].strip(),
-        })
-    return gene_data
+def make_lof_table(data_table, my_genes, my_samples):
+    """Calculate gene-level mutational statistics from a table of mutations.
 
+    Input: nested dict of genes -> samples -> list of mut. type, NMAF, Polyphen
+    Output: table stratifying the mutational status of a gene in each sample.
 
-def make_lof_table(gene_lookup, my_genes, my_samples):
-    """."""
+    The output table has a row for each gene and a column for each sample, in
+    which there is a number ranging from 0-2 that corresponds to the estimated
+    number of alleles lost in the sample. This value is calculated by summing
+    the normalized mutant alleles frequencies (NMAF) of all non-synonymous
+    mutations striking the gene in this sample, capped at 2.  In addition, the
+    final 9 columns of output are the counts of each mutation type (not weighted
+    by MAF).
+
+    This output is used as input to Step 2 to calculate the LOF burden.
+    """
     # Header
     yield ["Gene"] + my_samples + [
         "Missense:Benign", "Missense:Possibly", "Missense:Probably",
-        "MissenseNA", "Indel", "Nonsense", "Frameshift", "Splice-site", "Synonymous"]
+        "MissenseNA", "Indel", "Nonsense", "Frameshift", "Splice-site",
+        "Synonymous"]
 
+    gs_lookup = group_data_by_gs(data_table)
     for gene in my_genes:
         synonymous = missense_benign = missense_possibly = missense_probably = \
                 missense_na = frameshift = nonsense = splice = indel = 0
@@ -83,7 +69,7 @@ def make_lof_table(gene_lookup, my_genes, my_samples):
         for sample in my_samples:
             normalized = [0]
             # Count mutations of each type for this gene and sample
-            for entry in gene_lookup[gene][sample]:
+            for entry in gs_lookup[gene][sample]:
                 if entry['muttype'] == 'Silent':
                     synonymous += 1
                     continue
@@ -125,6 +111,20 @@ def make_lof_table(gene_lookup, my_genes, my_samples):
         yield out_row
 
 
+def group_data_by_gs(data_table):
+    """Group relevant fields in a data table by gene and sample."""
+    gene_data = collections.defaultdict(lambda: collections.defaultdict(list))
+    for _idx, row in data_table.iterrows():
+        samp = row['sample']
+        gene = row['gene']
+        gene_data[gene][samp].append({
+            'muttype': row['type'].strip(),
+            'normalized': row['Normalized'], # NMAF in the manuscript
+            'consequence': row['MissenseConsequence'].strip(),
+        })
+    return gene_data
+
+
 def rows2dframe(rows):
     """Convert an iterable of table rows to a pandas.DataFrame."""
     header = next(rows)
@@ -142,10 +142,9 @@ def main(args):
     if args.permute:
         permute_table(data_table)
 
-    gs_lookup = group_data_by_gs(data_table)
-    print("Saw", len(gs_lookup), "genes in", args.data_table, file=sys.stderr)
-
-    lof_table = rows2dframe(make_lof_table(gs_lookup, genes, samples))
+    lof_table = rows2dframe(make_lof_table(data_table, genes, samples))
+    print("Processed", len(lof_table.values), "genes in data table",
+          file=sys.stderr)
     lof_table.to_csv(sys.stdout, sep='\t', index=False)
 
 
