@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 
-"""Identify significantly mutated genes in a set of many WES samples."""
+"""Identify significantly mutated genes in a set of many WES samples.
+
+Prints a table of each gene's observed and expected mutation burdens and
+estimated FDR for predicted tumor suppressors.
+"""
 from __future__ import print_function, division
 
 import collections
@@ -226,9 +230,9 @@ def main(args):
             permute_table(data_table)
             ptable = rows2dframe(make_lof_table(data_table, genes, samples))
             perm_scores.extend(s for g, s in shainsig(ptable, samples, False))
-        print(file=sys.stderr)
         perm_scores = numpy.asfarray(sorted(perm_scores))
         perm_pctiles = numpy.arange(1, 0, -1. / len(perm_scores))
+        print("\nMax permutation score:", max(perm_scores), file=sys.stderr)
 
         # Do the math! Output a table!
         print("Gene", "Obs.Score", "Obs.Pctile", "Sim.Score", "Sim.Pctile", "FDR", sep='\t')
@@ -242,7 +246,7 @@ def main(args):
                 exp_pctile = perm_pctiles[score_rank]
                 # FDR: % false positives / % true positives
                 fdr = min(1.0, exp_pctile / obs_pctile)
-            exp_score = perm_scores[len(perm_scores) -
+            exp_score = perm_scores[len(perm_scores) - 1 -
                                     perm_pctiles_rev.searchsorted(obs_pctile)]
             print(gene, obs_score, obs_pctile, exp_score,
                   exp_pctile, fdr,
