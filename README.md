@@ -2,7 +2,7 @@ ShainSig
 ========
 
 Identify potential tumor suppressors from the relative burden of
-loss-of-function mutations. 
+loss-of-function mutations in genes.
 
 Usage 
 -----
@@ -18,8 +18,8 @@ Output is a tab-delimited table of:
 - Gene name
 - Observed score, based on mutation counts
 - Observed percentile of this gene, ranked among all genes in Samples.txt
-- Expected score based on simulations of random mutations
-- Expected percentile based on simulations of random mutations
+- Expected score, based on simulations of random mutations
+- Expected percentile
 - False discovery rate (FDR), the ratio of false positives (expected percentile)
   to true positives (observed percentile)
 
