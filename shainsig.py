@@ -19,7 +19,7 @@ import numpy
 # _____________________________________________________________________________
 # Step_1: Calculate gene-level mutational statistics
 
-def make_lof_table(data_table, my_genes, my_samples):
+def make_lof_table(data_table, my_genes, my_samples, summary_func):
     """Calculate gene-level mutational statistics from a table of mutations.
 
     Input: nested dict of genes -> samples -> list of mut. type, NMAF, Polyphen
@@ -84,8 +84,8 @@ def make_lof_table(data_table, my_genes, my_samples):
                     continue
 
                 normalized.append(entry['normalized'])
-            # Add up the normalized mutation counts for this gene and sample
-            out_row.append(min(2, sum(normalized)))
+            # Summarize the normalized mutation counts for this gene and sample
+            out_row.append(summary_func(normalized))
         out_row.extend((missense_benign, missense_possibly, missense_probably,
                         missense_na, indel, nonsense, frameshift, splice,
                         synonymous))
@@ -206,9 +206,13 @@ def main(args):
     genes = read_list(args.genes)
     samples = read_list(args.samples)
     data_table = pandas.read_table(args.data_table, na_filter=False)
+    summary_function = {'sumcap': lambda x: min(2, sum(x)),
+                        'mean': numpy.mean,
+                        'max': max}[args.function]
 
     # Step_1
-    lof_table = rows2dframe(make_lof_table(data_table, genes, samples))
+    lof_table = rows2dframe(make_lof_table(data_table, genes, samples,
+                                           summary_function))
     print("Processed", len(lof_table.values), "genes in data table",
           file=sys.stderr)
 
@@ -228,7 +232,8 @@ def main(args):
         for idx in range(args.permutations):
             print(idx + 1, end=' ', file=sys.stderr)
             permute_table(data_table)
-            ptable = rows2dframe(make_lof_table(data_table, genes, samples))
+            ptable = rows2dframe(make_lof_table(data_table, genes, samples,
+                                                summary_function))
             perm_scores.extend(s for g, s in shainsig(ptable, samples, False))
         perm_scores = numpy.asfarray(sorted(perm_scores))
         perm_pctiles = numpy.arange(1, 0, -1. / len(perm_scores))
@@ -268,7 +273,10 @@ if __name__ == '__main__':
                     help="List of gene names, one per line (Genes.txt")
     AP.add_argument('-s', '--samples', default="Samples.txt",
                     help="List of sample names, one per line (Samples.txt")
-    AP.add_argument('-p', '--permutations', type=int, #default=7,
+    AP.add_argument('-p', '--permutations', type=int, default=20,
                     help="""Number of times to permute the input data to
                     simulate the background mutation frequencies.""")
+    AP.add_argument('-f', '--function', default='sumcap',
+                    choices=['sumcap', 'max', 'mean'],
+                    help="Summary function for gene-level NMAF counts.")
     main(AP.parse_args())
