@@ -109,7 +109,7 @@ def group_data_by_gs(data_table):
 def rows2dframe(rows):
     """Convert an iterable of table rows to a pandas.DataFrame."""
     header = next(rows)
-    return pandas.DataFrame.from_records(rows, columns=header)
+    return pandas.DataFrame.from_records(list(rows), columns=header)
 
 
 # _____________________________________________________________________________
