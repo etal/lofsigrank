@@ -115,7 +115,7 @@ def rows2dframe(rows):
 # _____________________________________________________________________________
 # Step_2: Identify significantly mutated genes
 
-def shainsig(table, samples, verbose=True):
+def lof_sig_rank(table, samples, verbose=True):
     """Identify significantly mutated genes in the processed LOF table."""
     mut_probdam = 'Missense:Probably'
     mut_syn = 'Synonymous'
@@ -217,7 +217,7 @@ def main(args):
           file=sys.stderr)
 
     # Step_2
-    results = list(shainsig(lof_table, samples))
+    results = list(lof_sig_rank(lof_table, samples))
     results.sort(key=lambda pair: pair[1])
 
     # Step_3
@@ -234,7 +234,7 @@ def main(args):
             permute_table(data_table)
             ptable = rows2dframe(make_lof_table(data_table, genes, samples,
                                                 summary_function))
-            perm_scores.extend(s for g, s in shainsig(ptable, samples, False))
+            perm_scores.extend(s for g, s in lof_sig_rank(ptable, samples, False))
         perm_scores = numpy.asfarray(sorted(perm_scores))
         perm_pctiles = numpy.arange(1, 0, -1. / len(perm_scores))
         print("\nMax permutation score:", max(perm_scores), file=sys.stderr)
@@ -270,12 +270,12 @@ if __name__ == '__main__':
                     help="""Mutation data table with NMAF values and Polyphen-2
                     predictions (Data.txt)""")
     AP.add_argument('-g', '--genes', default="Genes.txt",
-                    help="List of gene names, one per line (Genes.txt")
+                    help="List of gene names, one per line (Genes.txt)")
     AP.add_argument('-s', '--samples', default="Samples.txt",
-                    help="List of sample names, one per line (Samples.txt")
+                    help="List of sample names, one per line (Samples.txt)")
     AP.add_argument('-p', '--permutations', type=int, default=20,
                     help="""Number of times to permute the input data to
-                    simulate the background mutation frequencies.""")
+                    simulate the background mutation frequencies (20).""")
     AP.add_argument('-f', '--function', default='sumcap',
                     choices=['sumcap', 'max', 'mean'],
                     help="Summary function for gene-level NMAF counts.")

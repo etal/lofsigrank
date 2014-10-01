@@ -1,5 +1,5 @@
-ShainSig
-========
+LOF SigRank
+===========
 
 Identify potential tumor suppressors from the relative burden of
 loss-of-function mutations in genes.
@@ -9,7 +9,7 @@ Usage
 
 To run the simulation with 100 iterations:
 
-    python shainsig.py Data.csv -g Genes.txt -s Samples.txt -p 100 > out.tsv
+    python lofsigrank.py Data.csv -g Genes.txt -s Samples.txt -p 100 > out.tsv
 
 Input files are included in this directory.
 
@@ -23,3 +23,9 @@ Output is a tab-delimited table of:
 - False discovery rate (FDR), the ratio of false positives (expected percentile)
   to true positives (observed percentile)
 
+Dependencies
+------------
+
+- [Python 2.7](https://www.python.org/)
+- [numpy](http://www.numpy.org/)
+- [pandas](http://pandas.pydata.org/)
