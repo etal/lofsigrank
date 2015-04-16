@@ -2,8 +2,9 @@
 
 """Identify significantly mutated genes in a set of many WES samples.
 
-Prints a table of each gene's observed and expected mutation burdens and
-estimated FDR for predicted tumor suppressors.
+Prints a table of each gene's observed and expected loss-of-function (LOF)
+mutation burdens and estimated false discovery rate (FDR) for predicted tumor
+suppressors.
 """
 from __future__ import print_function, division
 
@@ -14,6 +15,72 @@ import sys
 
 import pandas
 import numpy
+
+
+def main(args):
+    """Run the LOF SigRank procedure using command-line arguments."""
+    genes = read_list(args.genes)
+    samples = read_list(args.samples)
+    data_table = pandas.read_table(args.data_table, na_filter=False)
+    summary_function = {'sumcap': lambda x: min(2, sum(x)),
+                        'mean': numpy.mean,
+                        'max': max}[args.function]
+
+    # Step_1: Calculate gene-level mutational statistics
+    lof_table = make_lof_table(data_table, genes, samples, summary_function)
+    print("Processed", len(lof_table.values), "genes in data table",
+          file=sys.stderr)
+
+    # Step_2: Rank genes by burden of LOF mutations
+    gene_scores = sorted(lof_sig_scores(lof_table, samples),
+                         key=lambda pair: pair[1])
+
+    # Step_3: Compare gene LOF scores to a simulated "background" distribution
+    if args.permutations:
+        # Calculate gene score percentiles
+        orig_pctiles = numpy.arange(1, 0, -1. / len(gene_scores))
+
+        # Calculate percentiles for simulated "background" scores
+        perm_scores = simulate_lof_scores(data_table, args.permutations,
+                                          genes, samples, summary_function)
+
+        # Calculate FDR for each gene
+        table_header = ["Gene", "Obs.Score", "Obs.Pctile", "Sim.Score",
+                        "Sim.Pctile", "FDR"]
+        table_rows = []
+        perm_pctiles = numpy.arange(1, 0, -1. / len(perm_scores))
+        perm_pctiles_rev = perm_pctiles[::-1]
+        for (gene, obs_score), obs_pctile in zip(gene_scores, orig_pctiles):
+            score_rank = perm_scores.searchsorted(obs_score)
+            if score_rank == len(perm_scores):
+                exp_pctile = 0
+                fdr = 0.0
+            else:
+                exp_pctile = perm_pctiles[score_rank]
+                # FDR: % false positives / % true positives
+                fdr = min(1.0, exp_pctile / obs_pctile)
+            exp_score = perm_scores[len(perm_scores) - 1 -
+                                    perm_pctiles_rev.searchsorted(obs_pctile)]
+            table_rows.append((gene, obs_score, obs_pctile, exp_score,
+                               exp_pctile, fdr))
+        out_table = pandas.DataFrame.from_records(table_rows,
+                                                  columns=table_header)
+    else:
+        out_table = pandas.DataFrame.from_records(gene_scores,
+                                                  columns=["Gene", "Score"])
+
+    # Output as a table to file or screen
+    if args.output:
+        out_table.to_csv(args.output, index=False)
+    else:
+        print(out_table.to_string(index=False))
+
+
+def read_list(fname):
+    """Parse a "list" file of one string per line."""
+    with open(fname) as handle:
+        items = [line.strip() for line in handle]
+    return items
 
 
 # _____________________________________________________________________________
@@ -35,11 +102,11 @@ def make_lof_table(data_table, my_genes, my_samples, summary_func):
 
     This output is used as input to Step 2 to calculate the LOF burden.
     """
-    # Header
-    yield ["Gene"] + my_samples + [
+    table_header = ["Gene"] + my_samples + [
         "Missense:Benign", "Missense:Possibly", "Missense:Probably",
         "MissenseNA", "Indel", "Nonsense", "Frameshift", "Splice-site",
         "Synonymous"]
+    table_records = []
 
     gs_lookup = group_data_by_gs(data_table)
     for gene in my_genes:
@@ -89,7 +156,9 @@ def make_lof_table(data_table, my_genes, my_samples, summary_func):
         out_row.extend((missense_benign, missense_possibly, missense_probably,
                         missense_na, indel, nonsense, frameshift, splice,
                         synonymous))
-        yield out_row
+        table_records.append(out_row)
+
+    return pandas.DataFrame.from_records(table_records, columns=table_header)
 
 
 def group_data_by_gs(data_table):
@@ -106,17 +175,11 @@ def group_data_by_gs(data_table):
     return gene_data
 
 
-def rows2dframe(rows):
-    """Convert an iterable of table rows to a pandas.DataFrame."""
-    header = next(rows)
-    return pandas.DataFrame.from_records(list(rows), columns=header)
-
-
 # _____________________________________________________________________________
-# Step_2: Identify significantly mutated genes
+# Step_2: Rank genes by burden of LOF mutations
 
-def lof_sig_rank(table, samples, verbose=True):
-    """Identify significantly mutated genes in the processed LOF table."""
+def lof_sig_scores(table, samples, verbose=True):
+    """Calculate LOF mutation burden scores for genes in the processed table."""
     mut_probdam = 'Missense:Probably'
     mut_syn = 'Synonymous'
     mut_trunc = ['Nonsense', 'Frameshift', 'Splice-site']
@@ -137,7 +200,7 @@ def lof_sig_rank(table, samples, verbose=True):
                          tot_count_other))
     if verbose:
         print("Counted", tot_count_all, "mutations across", len(table), "genes",
-            "and", len(samples), "samples", file=sys.stderr)
+              "and", len(samples), "samples", file=sys.stderr)
 
     # Fraction of global mutations in each category of interest
     tot_frac_probdam = tot_count_probdam / tot_count_all
@@ -176,6 +239,22 @@ def lof_sig_rank(table, samples, verbose=True):
 # _____________________________________________________________________________
 # Step_3: False Discovery Rate (FDR) calculation
 
+def simulate_lof_scores(table, n_permutations, genes, samples, summary_func):
+    """Generate a background distribution of LOF scores via permutation."""
+    perm_scores = []
+    print("Permuting mutation data", n_permutations, "times:", end=' ',
+            file=sys.stderr)
+    for idx in range(n_permutations):
+        print(idx + 1, end=' ', file=sys.stderr)
+        permute_table(table)
+        ptable = make_lof_table(table, genes, samples, summary_func)
+        perm_scores.extend(s for g, s in
+                            lof_sig_scores(ptable, samples, False))
+    perm_scores = numpy.asfarray(sorted(perm_scores))
+    print("\nMax permutation score:", perm_scores[-1], file=sys.stderr)
+    return perm_scores
+
+
 def permute_table(dtable):
     """Permute a mutation data table's gene, sample and NMAF columns."""
     shuffle_field(dtable, 'gene')
@@ -193,90 +272,24 @@ def shuffle_field(dframe, field):
 
 
 # _____________________________________________________________________________
-
-def read_list(fname):
-    """Parse a "list" file of one string per line."""
-    with open(fname) as handle:
-        items = [line.strip() for line in handle]
-    return items
-
-
-def main(args):
-    """Run the script."""
-    genes = read_list(args.genes)
-    samples = read_list(args.samples)
-    data_table = pandas.read_table(args.data_table, na_filter=False)
-    summary_function = {'sumcap': lambda x: min(2, sum(x)),
-                        'mean': numpy.mean,
-                        'max': max}[args.function]
-
-    # Step_1
-    lof_table = rows2dframe(make_lof_table(data_table, genes, samples,
-                                           summary_function))
-    print("Processed", len(lof_table.values), "genes in data table",
-          file=sys.stderr)
-
-    # Step_2
-    results = list(lof_sig_rank(lof_table, samples))
-    results.sort(key=lambda pair: pair[1])
-
-    # Step_3
-    if args.permutations:
-        # Calculate gene score percentiles
-        orig_pctiles = numpy.arange(1, 0, -1. / len(results))
-
-        # Calculate percentiles for simulated "background" scores
-        perm_scores = []
-        print("Permuting mutation data", args.permutations, "times:", end=' ',
-              file=sys.stderr)
-        for idx in range(args.permutations):
-            print(idx + 1, end=' ', file=sys.stderr)
-            permute_table(data_table)
-            ptable = rows2dframe(make_lof_table(data_table, genes, samples,
-                                                summary_function))
-            perm_scores.extend(s for g, s in lof_sig_rank(ptable, samples, False))
-        perm_scores = numpy.asfarray(sorted(perm_scores))
-        perm_pctiles = numpy.arange(1, 0, -1. / len(perm_scores))
-        print("\nMax permutation score:", max(perm_scores), file=sys.stderr)
-
-        # Do the math! Output a table!
-        print("Gene", "Obs.Score", "Obs.Pctile", "Sim.Score", "Sim.Pctile", "FDR", sep='\t')
-        perm_pctiles_rev = perm_pctiles[::-1]
-        for (gene, obs_score), obs_pctile in zip(results, orig_pctiles):
-            score_rank = perm_scores.searchsorted(obs_score)
-            if score_rank == len(perm_scores):
-                exp_pctile = 0
-                fdr = 0.0
-            else:
-                exp_pctile = perm_pctiles[score_rank]
-                # FDR: % false positives / % true positives
-                fdr = min(1.0, exp_pctile / obs_pctile)
-            exp_score = perm_scores[len(perm_scores) - 1 -
-                                    perm_pctiles_rev.searchsorted(obs_pctile)]
-            print(gene, obs_score, obs_pctile, exp_score,
-                  exp_pctile, fdr,
-                  sep='\t')
-
-    else:
-        print("Gene", "Score", sep='\t')
-        for gene, score in results:
-            print(gene, score, sep='\t')
-
+# Command-line arguments
 
 if __name__ == '__main__':
     import argparse
-    AP = argparse.ArgumentParser(description=__doc__)
+    AP = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     AP.add_argument('data_table',
                     help="""Mutation data table with NMAF values and Polyphen-2
-                    predictions (Data.txt)""")
+                    predictions. (e.g. Data.txt)""")
     AP.add_argument('-g', '--genes', default="Genes.txt",
-                    help="List of gene names, one per line (Genes.txt)")
+                    help="List of gene names, one per line.")
     AP.add_argument('-s', '--samples', default="Samples.txt",
-                    help="List of sample names, one per line (Samples.txt)")
+                    help="List of sample names, one per line.")
     AP.add_argument('-p', '--permutations', type=int, default=20,
                     help="""Number of times to permute the input data to
-                    simulate the background mutation frequencies (20).""")
+                    simulate the background mutation frequencies.""")
     AP.add_argument('-f', '--function', default='sumcap',
                     choices=['sumcap', 'max', 'mean'],
                     help="Summary function for gene-level NMAF counts.")
+    AP.add_argument('-o', '--output', help="Output file name (*.csv).")
     main(AP.parse_args())
